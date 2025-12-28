@@ -7,43 +7,45 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== ENVIRONMENT VARIABLES =====
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
-// DEBUG (VERY IMPORTANT)
-console.log("REDIRECT_URI =", REDIRECT_URI);
+// avatar_uuid → tokens
+let users = {};
 
-// ===== SPOTIFY TOKENS (SINGLE USER FOR NOW) =====
-let access_token = "";
-let refresh_token = "";
-
-// ===== ROOT ROUTE =====
+// ---------- ROOT ----------
 app.get("/", (req, res) => {
-  res.send("Spotify connector is running.");
+  res.send("Spotify multi-user connector running.");
 });
 
-// ===== LOGIN ROUTE =====
+// ---------- LOGIN ----------
 app.get("/login", (req, res) => {
+  const user = req.query.user;
+  if (!user) {
+    res.status(400).send("Missing user parameter");
+    return;
+  }
+
   const scope = "user-read-currently-playing user-read-playback-state";
 
-  const authURL =
+  res.redirect(
     "https://accounts.spotify.com/authorize" +
-    "?response_type=code" +
-    "&client_id=" + CLIENT_ID +
-    "&scope=" + encodeURIComponent(scope) +
-    "&redirect_uri=" + encodeURIComponent(REDIRECT_URI);
-
-  res.redirect(authURL);
+      "?response_type=code" +
+      "&client_id=" + CLIENT_ID +
+      "&scope=" + encodeURIComponent(scope) +
+      "&redirect_uri=" + encodeURIComponent(REDIRECT_URI) +
+      "&state=" + encodeURIComponent(user)
+  );
 });
 
-// ===== CALLBACK ROUTE =====
+// ---------- CALLBACK ----------
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
+  const user = req.query.state;
 
-  if (!code) {
-    res.status(400).send("Missing code parameter");
+  if (!code || !user) {
+    res.status(400).send("Missing code or state");
     return;
   }
 
@@ -65,20 +67,23 @@ app.get("/callback", async (req, res) => {
 
   if (!tokenData.access_token) {
     console.error(tokenData);
-    res.status(500).send("Failed to get access token");
+    res.status(500).send("Token error");
     return;
   }
 
-  access_token = tokenData.access_token;
-  refresh_token = tokenData.refresh_token;
+  users[user] = {
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token
+  };
 
   res.send("Spotify connected. You can close this window.");
 });
 
-// ===== NOW PLAYING ROUTE =====
+// ---------- NOW PLAYING ----------
 app.get("/spotify", async (req, res) => {
-  if (!access_token) {
-    res.status(401).json({ error: "Not connected to Spotify" });
+  const user = req.query.user;
+  if (!user || !users[user]) {
+    res.status(401).json({ error: "User not connected" });
     return;
   }
 
@@ -86,7 +91,7 @@ app.get("/spotify", async (req, res) => {
     "https://api.spotify.com/v1/me/player/currently-playing",
     {
       headers: {
-        Authorization: "Bearer " + access_token
+        Authorization: "Bearer " + users[user].access_token
       }
     }
   );
@@ -97,7 +102,6 @@ app.get("/spotify", async (req, res) => {
   }
 
   const data = await apiRes.json();
-
   if (!data || !data.item) {
     res.status(204).send("");
     return;
@@ -111,7 +115,6 @@ app.get("/spotify", async (req, res) => {
   });
 });
 
-// ===== START SERVER =====
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
 });
