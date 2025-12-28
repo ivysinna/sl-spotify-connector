@@ -12,10 +12,10 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
 /*
-  userUUID -> {
+  avatarUUID -> {
     access_token,
     refresh_token,
-    last_touch
+    last_seen
   }
 */
 let users = {};
@@ -28,7 +28,7 @@ app.get("/", (req, res) => {
 /* ---------- LOGIN ---------- */
 app.get("/login", (req, res) => {
   const user = req.query.user;
-  if (!user) return res.status(400).send("Missing user");
+  if (!user) return res.status(400).send("Missing user UUID");
 
   const scope =
     "user-read-playback-state user-read-currently-playing";
@@ -47,7 +47,7 @@ app.get("/login", (req, res) => {
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
   const user = req.query.state;
-  if (!code || !user) return res.status(400).send("Missing data");
+  if (!code || !user) return res.status(400).send("Missing callback data");
 
   const tokenRes = await fetch(
     "https://accounts.spotify.com/api/token",
@@ -67,24 +67,21 @@ app.get("/callback", async (req, res) => {
   );
 
   const tokenData = await tokenRes.json();
-  if (!tokenData.access_token)
-    return res.status(500).send("Token error");
+  if (!tokenData.access_token) {
+    console.error(tokenData);
+    return res.status(500).send("Spotify token error");
+  }
 
   users[user] = {
     access_token: tokenData.access_token,
     refresh_token: tokenData.refresh_token,
-    last_touch: Date.now()
+    last_seen: Date.now()
   };
 
-  /*
-    LEGAL SESSION NUDGE
-    This does NOT start playback.
-    It only registers the session if a device exists.
-  */
+  /* Session warm-up (legal, read-only) */
   await fetch(
     "https://api.spotify.com/v1/me/player",
     {
-      method: "GET",
       headers: {
         Authorization: "Bearer " + tokenData.access_token
       }
@@ -92,7 +89,7 @@ app.get("/callback", async (req, res) => {
   ).catch(() => {});
 
   res.send(
-    "Spotify connected.\n\nIMPORTANT:\nOpen Spotify and press Play once."
+    "Spotify connected.\n\nIMPORTANT:\nOpen Spotify AFTER login and press Play once."
   );
 });
 
@@ -115,7 +112,7 @@ app.get("/spotify", async (req, res) => {
   const data = await apiRes.json();
   if (!data || !data.item) return res.status(204).send("");
 
-  users[user].last_touch = Date.now();
+  users[user].last_seen = Date.now();
 
   res.json({
     track: data.item.name,
@@ -126,7 +123,7 @@ app.get("/spotify", async (req, res) => {
   });
 });
 
-/* ---------- DEVICES ---------- */
+/* ---------- DEVICE CHECK ---------- */
 app.get("/device", async (req, res) => {
   const user = req.query.user;
   if (!user || !users[user]) return res.status(401).send("");
