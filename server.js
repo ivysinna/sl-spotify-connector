@@ -11,6 +11,13 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
+/*
+  userUUID -> {
+    access_token,
+    refresh_token,
+    last_touch
+  }
+*/
 let users = {};
 
 /* ---------- ROOT ---------- */
@@ -65,14 +72,19 @@ app.get("/callback", async (req, res) => {
 
   users[user] = {
     access_token: tokenData.access_token,
-    refresh_token: tokenData.refresh_token
+    refresh_token: tokenData.refresh_token,
+    last_touch: Date.now()
   };
 
-  // 🔴 CRITICAL FIX: ACTIVATE DEVICE SESSION
+  /*
+    LEGAL SESSION NUDGE
+    This does NOT start playback.
+    It only registers the session if a device exists.
+  */
   await fetch(
-    "https://api.spotify.com/v1/me/player/pause",
+    "https://api.spotify.com/v1/me/player",
     {
-      method: "PUT",
+      method: "GET",
       headers: {
         Authorization: "Bearer " + tokenData.access_token
       }
@@ -80,7 +92,7 @@ app.get("/callback", async (req, res) => {
   ).catch(() => {});
 
   res.send(
-    "Spotify connected.\nOpen Spotify and press Play once."
+    "Spotify connected.\n\nIMPORTANT:\nOpen Spotify and press Play once."
   );
 });
 
@@ -103,6 +115,8 @@ app.get("/spotify", async (req, res) => {
   const data = await apiRes.json();
   if (!data || !data.item) return res.status(204).send("");
 
+  users[user].last_touch = Date.now();
+
   res.json({
     track: data.item.name,
     artist: data.item.artists[0].name,
@@ -110,6 +124,24 @@ app.get("/spotify", async (req, res) => {
     duration_ms: data.item.duration_ms || 0,
     is_playing: data.is_playing
   });
+});
+
+/* ---------- DEVICES ---------- */
+app.get("/device", async (req, res) => {
+  const user = req.query.user;
+  if (!user || !users[user]) return res.status(401).send("");
+
+  const apiRes = await fetch(
+    "https://api.spotify.com/v1/me/player/devices",
+    {
+      headers: {
+        Authorization: "Bearer " + users[user].access_token
+      }
+    }
+  );
+
+  const data = await apiRes.json();
+  res.json(data);
 });
 
 /* ---------- START ---------- */
