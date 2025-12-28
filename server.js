@@ -1,7 +1,7 @@
-// server.js
+// server.js (FIXED UUID VALIDATION + SAFETY)
+
 import express from "express";
 import fetch from "node-fetch";
-import crypto from "crypto";
 
 const app = express();
 
@@ -11,8 +11,16 @@ const REDIRECT_URI = "https://sl-spotify-connector.onrender.com/callback";
 
 const states = new Map();
 
+function isUUID(v) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
 app.get("/login", (req, res) => {
     const { state, avatar } = req.query;
+
+    if (!state || !avatar || !isUUID(avatar)) {
+        return res.status(400).send("Missing or invalid avatar UUID");
+    }
 
     states.set(state, {
         avatar,
@@ -20,13 +28,12 @@ app.get("/login", (req, res) => {
         token: null
     });
 
-    const scope = "user-read-playback-state user-read-currently-playing";
     const authURL =
         "https://accounts.spotify.com/authorize?" +
         new URLSearchParams({
             response_type: "code",
             client_id: CLIENT_ID,
-            scope,
+            scope: "user-read-playback-state user-read-currently-playing",
             redirect_uri: REDIRECT_URI,
             state
         });
@@ -55,20 +62,22 @@ app.get("/callback", async (req, res) => {
 
     const tokenData = await tokenRes.json();
 
+    if (!tokenData.access_token) {
+        return res.status(500).send("Spotify auth failed");
+    }
+
     const entry = states.get(state);
     entry.connected = true;
     entry.token = tokenData.access_token;
     states.set(state, entry);
 
-    res.send("Spotify connected. You may now return to Second Life.");
+    res.send("Spotify connected. Return to Second Life.");
 });
 
 app.get("/status", (req, res) => {
     const { state } = req.query;
     if (!states.has(state)) return res.json({ connected: false });
-
-    const entry = states.get(state);
-    res.json({ connected: entry.connected });
+    res.json({ connected: states.get(state).connected });
 });
 
 const port = process.env.PORT || 3000;
