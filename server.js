@@ -7,28 +7,45 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let access_token = "";
-let refresh_token = "";
-
+// ===== ENVIRONMENT VARIABLES =====
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
-// ---------- LOGIN ----------
-app.get("/login", (req, res) => {
-  const scope = "user-read-currently-playing user-read-playback-state";
-  res.redirect(
-    "https://accounts.spotify.com/authorize" +
-      "?response_type=code" +
-      "&client_id=" + CLIENT_ID +
-      "&scope=" + encodeURIComponent(scope) +
-      "&redirect_uri=" + encodeURIComponent(REDIRECT_URI)
-  );
+// DEBUG (VERY IMPORTANT)
+console.log("REDIRECT_URI =", REDIRECT_URI);
+
+// ===== SPOTIFY TOKENS (SINGLE USER FOR NOW) =====
+let access_token = "";
+let refresh_token = "";
+
+// ===== ROOT ROUTE =====
+app.get("/", (req, res) => {
+  res.send("Spotify connector is running.");
 });
 
-// ---------- CALLBACK ----------
+// ===== LOGIN ROUTE =====
+app.get("/login", (req, res) => {
+  const scope = "user-read-currently-playing user-read-playback-state";
+
+  const authURL =
+    "https://accounts.spotify.com/authorize" +
+    "?response_type=code" +
+    "&client_id=" + CLIENT_ID +
+    "&scope=" + encodeURIComponent(scope) +
+    "&redirect_uri=" + encodeURIComponent(REDIRECT_URI);
+
+  res.redirect(authURL);
+});
+
+// ===== CALLBACK ROUTE =====
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
+
+  if (!code) {
+    res.status(400).send("Missing code parameter");
+    return;
+  }
 
   const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
@@ -45,16 +62,23 @@ app.get("/callback", async (req, res) => {
   });
 
   const tokenData = await tokenRes.json();
+
+  if (!tokenData.access_token) {
+    console.error(tokenData);
+    res.status(500).send("Failed to get access token");
+    return;
+  }
+
   access_token = tokenData.access_token;
   refresh_token = tokenData.refresh_token;
 
   res.send("Spotify connected. You can close this window.");
 });
 
-// ---------- NOW PLAYING ----------
+// ===== NOW PLAYING ROUTE =====
 app.get("/spotify", async (req, res) => {
   if (!access_token) {
-    res.status(401).json({ error: "Not connected" });
+    res.status(401).json({ error: "Not connected to Spotify" });
     return;
   }
 
@@ -74,6 +98,11 @@ app.get("/spotify", async (req, res) => {
 
   const data = await apiRes.json();
 
+  if (!data || !data.item) {
+    res.status(204).send("");
+    return;
+  }
+
   res.json({
     track: data.item.name,
     artist: data.item.artists[0].name,
@@ -82,6 +111,7 @@ app.get("/spotify", async (req, res) => {
   });
 });
 
+// ===== START SERVER =====
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
 });
